@@ -149,6 +149,7 @@ class Eraser(object):
         :return: Null
         """
 
+        count = 0
         posts = self.driver.find_elements_by_css_selector(self.post_css_selector)
         menu_indicators = [
             'Edit',
@@ -168,9 +169,6 @@ class Eraser(object):
             if post.id in self.handled_posts:
                 continue
 
-            self.scroll_to_top()
-            self.scroll_to_element(post)
-
             self.handled_posts[post.id] = True
             date_element = None
             try:
@@ -189,58 +187,65 @@ class Eraser(object):
                 self.set_color(post, self.skip_background_color)
                 continue
 
-            # Find the button that pops the remove from timeline/delete menu
-            menu_button = None
-            try:
-                menu_button = post.find_element_by_xpath('./table/tbody/tr/td[3]/div/div[2]/a')
-            except:
-                pass
-
-            if menu_button is None:
-                print('No matching menu button found for {}'.format(str(post)))
-                self.set_color(post, self.error_background_color)
-                return
-
             while True:
+                # Find the button that pops the remove from timeline/delete menu
+                menu_button = None
                 try:
-                    self.click(menu_button)
-                except:
-                    sleep(1)
-                    continue
-
-                break
-
-            self.set_color(menu_button, 'red')
-
-            purge_menu = None
-            purge_menus = self.driver.find_elements_by_css_selector(self.menu_selector)
-            for menu in purge_menus:
-                if not 'hidden_elem' in menu.get_attribute('class'):
-                    purge_menu = menu
-                    break
-
-            purge_button = None
-            purge_background = None
-            delete = False
-            selector = None
-
-            for indicator in purge_indicators:
-                try:
-                    selector = './/span[contains(text(), "{text}")]'.format(text=indicator[1])
-                    purge_button = purge_menu.find_element_by_xpath(selector)
+                    menu_button = post.find_element_by_xpath('./table/tbody/tr/td[3]/div/div[2]/a')
                 except:
                     pass
 
-                if purge_button:
-                    if indicator == purge_indicators[0]:
-                        delete = True
-                    purge_background = indicator[0]
+                if menu_button is None:
+                    print('No matching menu button found for {}'.format(str(post)))
+                    self.set_color(post, self.error_background_color)
+                    return
+
+                while True:
+                    try:
+                        self.click(menu_button)
+                    except:
+                        sleep(1)
+                        continue
+
                     break
 
-            if purge_button is None:
-                print('No purge button found for {}'.format(str(post)))
-                self.set_color(post, self.error_background_color)
-                continue
+                self.set_color(menu_button, 'red')
+
+                purge_menu = None
+                purge_button = None
+                purge_background = None
+                delete = False
+                selector = None
+
+                purge_menus = self.driver.find_elements_by_css_selector(self.menu_selector)
+                for menu in purge_menus:
+                    if not 'hidden_elem' in menu.get_attribute('class'):
+                        purge_menu = menu
+                        break
+
+
+                for indicator in purge_indicators:
+                    try:
+                        selector = './/span[contains(text(), "{text}")]'.format(text=indicator[1])
+                        purge_button = purge_menu.find_element_by_xpath(selector)
+                    except:
+                        pass
+
+                    if purge_button:
+                        if indicator == purge_indicators[0]:
+                            delete = True
+                        purge_background = indicator[0]
+                        break
+
+                if purge_button is None:
+                    print('No purge button found for {}'.format(str(post)))
+                    self.set_color(post, self.error_background_color)
+
+                    sleep(2)
+
+                    continue
+                else:
+                    break
 
             print('[*] Purging element...')
             while True:
@@ -283,7 +288,8 @@ class Eraser(object):
                         break
             sleep(2)
 
-            self.set_color(post, purge_background)
+            if self.dry_run:
+                self.set_color(post, purge_background)
 
             if delete:
                 self.deleted_count += 1
@@ -292,8 +298,12 @@ class Eraser(object):
                 self.hidden_count += 1
                 print('[+] Element hidden ({count} in total)'.format(count=self.hidden_count))
 
+            count += 1
             if self.done():
-                return
+                return count
+
+        return count
+
 
     def set_attribute(self, element, attribute, value):
         self.driver.execute_script("arguments[0].setAttribute('{}', '{}')".format(attribute, value), element)
@@ -324,7 +334,12 @@ class Eraser(object):
                 fail_count += 1
                 continue
             else:
-                self.click(scroll_result)
+                try:
+                    self.click(scroll_result)
+                except:
+                    fail_count += 1
+                    continue
+
                 fail_count = 0
 
             sleep(self.wait)
@@ -348,14 +363,18 @@ if __name__ == '__main__':
     password = getpass.getpass()
     eraser = Eraser(email=email, password=password, wait=args.wait, dry_run=args.dry, days=args.days, count=args.count)
     eraser.login()
-    eraser.go_to_activity_page()
 
-    eraser.load_activity()
+    while True:
+        eraser.go_to_activity_page()
 
-    days = args.days
-    print ('[*] Trying to delete elements made more than {} days ago'.format(days))
-    if args.dry:
-        print('[*] Doing a dry run')
-    eraser.delete_posts()
+        eraser.load_activity()
+
+        days = args.days
+        print ('[*] Trying to delete elements made more than {} days ago'.format(days))
+        if args.dry:
+            print('[*] Doing a dry run')
+        if eraser.delete_posts() == 0:
+            break
+
 
     print('Deleted {} elements and made {} not visible on your timeline'.format(eraser.deleted_count, eraser.hidden_count))
